@@ -31,7 +31,6 @@ version.workspace = true
 all-features = true
 
 [features]
-default = ["encoding_rs"]
 encoding_rs = ["dep:encoding_rs", "dep:pin-project-lite", "dep:tokio-util"]
 
 [dependencies]
