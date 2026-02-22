@@ -21,7 +21,7 @@ use datafusion_datasource::projection::{ProjectionOpener, SplitProjection};
 use datafusion_physical_plan::projection::ProjectionExprs;
 use std::any::Any;
 use std::fmt;
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::sync::Arc;
 use std::task::Poll;
 
@@ -424,7 +424,7 @@ impl FileOpener for CsvOpener {
 
                     #[cfg(feature = "encoding_rs")]
                     if let Some(encoding) = encoding {
-                        decoder = encoding.convert_read(decoder);
+                        decoder = encoding.convert_read(BufReader::new(decoder));
                     }
 
                     let mut reader = config.open(decoder)?;
