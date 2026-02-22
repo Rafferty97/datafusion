@@ -17,54 +17,54 @@
 
 [workspace]
 members = [
-    "datafusion/common",
-    "datafusion/common-runtime",
+    "benchmarks",
+    "datafusion-cli",
+    "datafusion-examples",
+    "datafusion-examples/examples/ffi/ffi_example_table_provider",
+    "datafusion-examples/examples/ffi/ffi_module_interface",
+    "datafusion-examples/examples/ffi/ffi_module_loader",
     "datafusion/catalog",
     "datafusion/catalog-listing",
+    "datafusion/common",
+    "datafusion/common-runtime",
+    "datafusion/core",
     "datafusion/datasource",
     "datafusion/datasource-arrow",
     "datafusion/datasource-avro",
     "datafusion/datasource-csv",
     "datafusion/datasource-json",
     "datafusion/datasource-parquet",
-    "datafusion/core",
+    "datafusion/doc",
+    "datafusion/execution",
     "datafusion/expr",
     "datafusion/expr-common",
-    "datafusion/execution",
     "datafusion/ffi",
     "datafusion/functions",
     "datafusion/functions-aggregate",
     "datafusion/functions-aggregate-common",
-    "datafusion/functions-table",
     "datafusion/functions-nested",
+    "datafusion/functions-table",
     "datafusion/functions-window",
     "datafusion/functions-window-common",
+    "datafusion/macros",
     "datafusion/optimizer",
     "datafusion/physical-expr",
     "datafusion/physical-expr-adapter",
     "datafusion/physical-expr-common",
     "datafusion/physical-optimizer",
-    "datafusion/pruning",
     "datafusion/physical-plan",
     "datafusion/proto",
-    "datafusion/proto/gen",
     "datafusion/proto-common",
     "datafusion/proto-common/gen",
+    "datafusion/proto/gen",
+    "datafusion/pruning",
     "datafusion/session",
     "datafusion/spark",
     "datafusion/sql",
     "datafusion/sqllogictest",
     "datafusion/substrait",
     "datafusion/wasmtest",
-    "datafusion-cli",
-    "datafusion-examples",
-    "datafusion-examples/examples/ffi/ffi_example_table_provider",
-    "datafusion-examples/examples/ffi/ffi_module_interface",
-    "datafusion-examples/examples/ffi/ffi_module_loader",
     "test-utils",
-    "benchmarks",
-    "datafusion/macros",
-    "datafusion/doc",
 ]
 exclude = ["dev/depcheck"]
 resolver = "2"
@@ -92,8 +92,8 @@ ahash = { version = "0.8", default-features = false, features = [
 ] }
 apache-avro = { version = "0.21", default-features = false }
 arrow = { version = "57.3.0", features = [
-    "prettyprint",
     "chrono-tz",
+    "prettyprint",
 ] }
 arrow-buffer = { version = "57.2.0", default-features = false }
 arrow-flight = { version = "57.3.0", features = [
@@ -151,6 +151,7 @@ datafusion-sql = { path = "datafusion/sql", version = "52.1.0" }
 datafusion-substrait = { path = "datafusion/substrait", version = "52.1.0" }
 
 doc-comment = "0.3"
+encoding_rs = "0.8.35"
 env_logger = "0.11"
 flate2 = "1.1.9"
 futures = "0.3"
@@ -159,7 +160,7 @@ half = { version = "2.7.0", default-features = false }
 hashbrown = { version = "0.16.1" }
 hex = { version = "0.4.3" }
 indexmap = "2.13.0"
-insta = { version = "1.46.3", features = ["glob", "filters"] }
+insta = { version = "1.46.3", features = ["filters", "glob"] }
 itertools = "0.14"
 liblzma = { version = "0.4.6", features = ["static"] }
 log = "^0.4"
@@ -210,9 +211,9 @@ allow_attributes = "warn"
 
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [
-    'cfg(datafusion_coop, values("tokio", "tokio_fallback", "per_stream"))',
     "cfg(tarpaulin)",
     "cfg(tarpaulin_include)",
+    'cfg(datafusion_coop, values("tokio", "tokio_fallback", "per_stream"))',
 ] }
 unused_qualifications = "deny"
 

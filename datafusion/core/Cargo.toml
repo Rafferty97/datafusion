@@ -19,7 +19,7 @@
 name = "datafusion"
 description = "DataFusion is an in-memory query engine that uses Apache Arrow as the memory model"
 keywords = ["arrow", "query", "sql"]
-include = ["benches/*.rs", "src/**/*.rs", "Cargo.toml", "LICENSE.txt", "NOTICE.txt"]
+include = ["Cargo.toml", "LICENSE.txt", "NOTICE.txt", "benches/*.rs", "src/**/*.rs"]
 readme = "../../README.md"
 version = { workspace = true }
 edition = { workspace = true }
@@ -46,38 +46,39 @@ array_expressions = ["nested_expressions"]
 avro = ["datafusion-common/avro", "datafusion-datasource-avro"]
 backtrace = ["datafusion-common/backtrace"]
 compression = [
-    "liblzma",
     "bzip2",
-    "flate2",
-    "zstd",
     "datafusion-datasource-arrow/compression",
     "datafusion-datasource/compression",
+    "flate2",
+    "liblzma",
+    "zstd",
 ]
+encoding_rs = ["datafusion-datasource-csv/encoding_rs"]
 crypto_expressions = ["datafusion-functions/crypto_expressions"]
 datetime_expressions = ["datafusion-functions/datetime_expressions"]
 default = [
-    "nested_expressions",
+    "compression",
     "crypto_expressions",
     "datetime_expressions",
     "encoding_expressions",
-    "regex_expressions",
-    "string_expressions",
-    "unicode_expressions",
-    "compression",
+    "nested_expressions",
     "parquet",
     "recursive_protection",
+    "regex_expressions",
     "sql",
+    "string_expressions",
+    "unicode_expressions",
 ]
 encoding_expressions = ["datafusion-functions/encoding_expressions"]
 # Used for testing ONLY: causes all values to hash to the same value (test for collisions)
-force_hash_collisions = ["datafusion-physical-plan/force_hash_collisions", "datafusion-common/force_hash_collisions"]
+force_hash_collisions = ["datafusion-common/force_hash_collisions", "datafusion-physical-plan/force_hash_collisions"]
 math_expressions = ["datafusion-functions/math_expressions"]
-parquet = ["datafusion-common/parquet", "dep:parquet", "datafusion-datasource-parquet"]
+parquet = ["datafusion-common/parquet", "datafusion-datasource-parquet", "dep:parquet"]
 parquet_encryption = [
-    "parquet",
-    "parquet/encryption",
     "datafusion-common/parquet_encryption",
     "datafusion-datasource-parquet/parquet_encryption",
+    "parquet",
+    "parquet/encryption",
 ]
 regex_expressions = [
     "datafusion-functions/regex_expressions",
@@ -86,8 +87,8 @@ recursive_protection = [
     "datafusion-common/recursive_protection",
     "datafusion-expr/recursive_protection",
     "datafusion-optimizer/recursive_protection",
-    "datafusion-physical-optimizer/recursive_protection",
     "datafusion-physical-expr/recursive_protection",
+    "datafusion-physical-optimizer/recursive_protection",
     "datafusion-sql/recursive_protection",
     "sqlparser/recursive-protection",
 ]
@@ -105,8 +106,8 @@ sql = [
 ]
 string_expressions = ["datafusion-functions/string_expressions"]
 unicode_expressions = [
-    "datafusion-sql?/unicode_expressions",
     "datafusion-functions/unicode_expressions",
+    "datafusion-sql?/unicode_expressions",
 ]
 extended_tests = []
 
@@ -158,12 +159,12 @@ sqlparser = { workspace = true, optional = true }
 tempfile = { workspace = true }
 tokio = { workspace = true }
 url = { workspace = true }
-uuid = { workspace = true, features = ["v4", "js"] }
+uuid = { workspace = true, features = ["js", "v4"] }
 zstd = { workspace = true, optional = true }
 
 [dev-dependencies]
 async-trait = { workspace = true }
-criterion = { workspace = true, features = ["async_tokio", "async_futures"] }
+criterion = { workspace = true, features = ["async_futures", "async_tokio"] }
 ctor = { workspace = true }
 dashmap = "6.1.0"
 datafusion-doc = { workspace = true }
@@ -184,10 +185,10 @@ rstest = { workspace = true }
 serde_json = { workspace = true }
 sysinfo = "0.38.2"
 test-utils = { path = "../../test-utils" }
-tokio = { workspace = true, features = ["rt-multi-thread", "parking_lot", "fs"] }
+tokio = { workspace = true, features = ["fs", "parking_lot", "rt-multi-thread"] }
 
 [package.metadata.cargo-machete]
-ignored = ["datafusion-doc", "datafusion-macros", "dashmap"]
+ignored = ["dashmap", "datafusion-doc", "datafusion-macros"]
 
 [target.'cfg(not(target_os = "windows"))'.dev-dependencies]
 nix = { version = "0.31.1", features = ["fs"] }
