@@ -45,6 +45,8 @@ use datafusion_physical_plan::{
     DisplayFormatType, ExecutionPlan, ExecutionPlanProperties,
 };
 
+#[cfg(feature = "encoding_rs")]
+use crate::encoding::CharEncoding;
 use crate::file_format::CsvDecoder;
 use futures::{StreamExt, TryStreamExt};
 use object_store::buffered::BufWriter;
@@ -214,6 +216,7 @@ impl CsvSource {
 /// A [`FileOpener`] that opens a CSV file and yields a [`FileOpenFuture`]
 pub struct CsvOpener {
     config: Arc<CsvSource>,
+    encoding: Option<CharEncoding>,
     file_compression_type: FileCompressionType,
     object_store: Arc<dyn ObjectStore>,
     partition_index: usize,
@@ -223,11 +226,13 @@ impl CsvOpener {
     /// Returns a [`CsvOpener`]
     pub fn new(
         config: Arc<CsvSource>,
+        encoding: Option<CharEncoding>,
         file_compression_type: FileCompressionType,
         object_store: Arc<dyn ObjectStore>,
     ) -> Self {
         Self {
             config,
+            encoding,
             file_compression_type,
             object_store,
             partition_index: 0,
@@ -248,8 +253,15 @@ impl FileSource for CsvSource {
         base_config: &FileScanConfig,
         partition_index: usize,
     ) -> Result<Arc<dyn FileOpener>> {
+        let encoding = self
+            .options
+            .encoding
+            .as_deref()
+            .map(CharEncoding::for_label)
+            .transpose()?;
         let mut opener = Arc::new(CsvOpener {
             config: Arc::new(self.clone()),
+            encoding,
             file_compression_type: base_config.file_compression_type,
             object_store,
             partition_index,
@@ -355,7 +367,8 @@ impl FileOpener for CsvOpener {
         config.options.has_header = Some(csv_has_header);
         config.options.truncated_rows = Some(config.truncate_rows());
 
-        let file_compression_type = self.file_compression_type.to_owned();
+        let encoding = self.encoding;
+        let file_compression_type = self.file_compression_type;
 
         if partitioned_file.range.is_some() {
             assert!(
@@ -399,7 +412,7 @@ impl FileOpener for CsvOpener {
                 #[cfg(not(target_arch = "wasm32"))]
                 GetResultPayload::File(mut file, _) => {
                     let is_whole_file_scanned = partitioned_file.range.is_none();
-                    let decoder = if is_whole_file_scanned {
+                    let mut decoder = if is_whole_file_scanned {
                         // Don't seek if no range as breaks FIFO files
                         file_compression_type.convert_read(file)?
                     } else {
@@ -408,6 +421,11 @@ impl FileOpener for CsvOpener {
                             file.take((result.range.end - result.range.start) as u64),
                         )?
                     };
+
+                    #[cfg(feature = "encoding_rs")]
+                    if let Some(encoding) = encoding {
+                        decoder = encoding.convert_read(decoder);
+                    }
 
                     let mut reader = config.open(decoder)?;
 
@@ -426,7 +444,14 @@ impl FileOpener for CsvOpener {
                 GetResultPayload::Stream(s) => {
                     let decoder = config.builder().build_decoder();
                     let s = s.map_err(DataFusionError::from);
-                    let input = file_compression_type.convert_stream(s.boxed())?.fuse();
+                    let mut input = file_compression_type.convert_stream(s.boxed())?;
+
+                    #[cfg(feature = "encoding_rs")]
+                    if let Some(encoding) = encoding {
+                        input = encoding.convert_stream(input);
+                    }
+
+                    let input = input.fuse();
 
                     let stream = deserialize_stream(
                         input,

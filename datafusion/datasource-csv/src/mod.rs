@@ -20,6 +20,7 @@
 // https://github.com/apache/datafusion/issues/11143
 #![cfg_attr(not(test), deny(clippy::clone_on_ref_ptr))]
 
+mod encoding;
 pub mod file_format;
 pub mod source;
 

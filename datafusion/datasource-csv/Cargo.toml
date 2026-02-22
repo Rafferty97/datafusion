@@ -30,6 +30,10 @@ version.workspace = true
 [package.metadata.docs.rs]
 all-features = true
 
+[features]
+default = ["encoding_rs"]
+encoding_rs = ["dep:encoding_rs", "dep:tokio-util"]
+
 [dependencies]
 arrow = { workspace = true }
 async-trait = { workspace = true }
@@ -47,6 +51,7 @@ futures = { workspace = true }
 object_store = { workspace = true }
 regex = { workspace = true }
 tokio = { workspace = true }
+tokio-util = { workspace = true, optional = true }
 
 # Note: add additional linter rules in lib.rs.
 # Rust does not support workspace + new linter rules in subcrates yet

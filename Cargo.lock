@@ -2022,6 +2022,7 @@ dependencies = [
  "object_store",
  "regex",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]
