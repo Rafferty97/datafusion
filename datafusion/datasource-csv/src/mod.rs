@@ -44,3 +44,17 @@ pub fn partitioned_csv_config(
             .build(),
     )
 }
+
+#[cfg(not(feature = "encoding_rs"))]
+mod encoding {
+    #[derive(Clone, Copy)]
+    pub struct CharEncoding;
+
+    impl CharEncoding {
+        pub fn for_label(_label: &str) -> datafusion_common::Result<CharEncoding> {
+            use datafusion_common::DataFusionError::Configuration;
+            let msg = "feature 'encoding_rs' must be enabled to decode non-UTF-8 files";
+            Err(Configuration(msg.into()))
+        }
+    }
+}

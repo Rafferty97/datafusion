@@ -21,7 +21,7 @@ use datafusion_datasource::projection::{ProjectionOpener, SplitProjection};
 use datafusion_physical_plan::projection::ProjectionExprs;
 use std::any::Any;
 use std::fmt;
-use std::io::{BufReader, Read, Seek, SeekFrom};
+use std::io::{Read, Seek, SeekFrom};
 use std::sync::Arc;
 use std::task::Poll;
 
@@ -45,7 +45,6 @@ use datafusion_physical_plan::{
     DisplayFormatType, ExecutionPlan, ExecutionPlanProperties,
 };
 
-#[cfg(feature = "encoding_rs")]
 use crate::encoding::CharEncoding;
 use crate::file_format::CsvDecoder;
 use futures::{StreamExt, TryStreamExt};
@@ -424,6 +423,7 @@ impl FileOpener for CsvOpener {
 
                     #[cfg(feature = "encoding_rs")]
                     if let Some(encoding) = encoding {
+                        use std::io::BufReader;
                         decoder = encoding.convert_read(BufReader::new(decoder));
                     }
 

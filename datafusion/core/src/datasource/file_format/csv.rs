@@ -230,6 +230,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn read_windows1252_encoding() -> Result<()> {
+        let session_ctx = SessionContext::new();
+        let state = session_ctx.state();
+        let task_ctx = session_ctx.task_ctx();
+        let exec = get_exec(&state, "windows1252.csv", None, None, true).await?;
+        let batches = collect(exec, task_ctx).await?;
+
+        assert_eq!(1, batches.len());
+        assert_eq!(3, batches[0].num_columns());
+        assert_eq!(3, batches[0].num_rows());
+        let o = batches[0]
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        assert_eq!("José", o.value(0));
+        assert_eq!("François", o.value(1));
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn read_limit() -> Result<()> {
         let session_ctx = SessionContext::new();
         let state = session_ctx.state();
