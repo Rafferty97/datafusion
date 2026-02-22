@@ -2020,6 +2020,7 @@ dependencies = [
  "encoding_rs",
  "futures",
  "object_store",
+ "pin-project-lite",
  "regex",
  "tokio",
  "tokio-util",

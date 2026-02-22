@@ -32,7 +32,7 @@ all-features = true
 
 [features]
 default = ["encoding_rs"]
-encoding_rs = ["dep:encoding_rs", "dep:tokio-util"]
+encoding_rs = ["dep:encoding_rs", "dep:pin-project-lite", "dep:tokio-util"]
 
 [dependencies]
 arrow = { workspace = true }
@@ -49,6 +49,7 @@ datafusion-session = { workspace = true }
 encoding_rs = { workspace = true, optional = true }
 futures = { workspace = true }
 object_store = { workspace = true }
+pin-project-lite = { version = "^0.2.7", optional = true }
 regex = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true, optional = true }

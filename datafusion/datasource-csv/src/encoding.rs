@@ -1,15 +1,13 @@
 #![cfg(feature = "encoding_rs")]
 
-use std::{
-    io::{BufRead, BufReader, Read},
-    pin::Pin,
-    task::{Context, Poll},
-};
+use std::io::{BufRead, BufReader, Read};
+use std::task::Poll;
 
 use bytes::{Buf, Bytes, BytesMut};
 use datafusion_common::{DataFusionError, Result};
 use encoding_rs::{Decoder, Encoding};
 use futures::{Stream, stream::BoxStream};
+use pin_project_lite::pin_project;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct CharEncoding(&'static Encoding);
@@ -39,6 +37,7 @@ impl CharEncoding {
             inner: s,
             chunk: None,
             decoder: BufDecoder::new(self.0.new_decoder(), 4096),
+            done: false,
         })
     }
 }
@@ -56,61 +55,58 @@ impl<R: BufRead + Send> Read for CharDecoder<R> {
         Ok(written)
     }
 }
-
-struct AsyncCharDecoder<S> {
-    inner: S,
-    chunk: Option<Bytes>,
-    decoder: BufDecoder,
+pin_project! {
+    struct AsyncCharDecoder<S> {
+        #[pin]
+        inner: S,
+        chunk: Option<Bytes>,
+        decoder: BufDecoder,
+        done: bool,
+    }
 }
 
 impl<S: Stream<Item = Result<Bytes>>> Stream for AsyncCharDecoder<S> {
     type Item = Result<Bytes>;
 
     fn poll_next(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
     ) -> Poll<Option<Self::Item>> {
         loop {
-            let (src, last) = match self.as_mut().chunk() {
-                Some(chunk) if !chunk.is_empty() => (&*chunk.clone(), false),
-                _ => match self.as_mut().inner().as_mut().poll_next(cx) {
+            let mut this = self.as_mut().project();
+
+            if *this.done {
+                return Poll::Ready(None);
+            }
+
+            let src = match this.chunk {
+                Some(chunk) if !chunk.is_empty() => &*chunk.clone(),
+                _ => match this.inner.as_mut().poll_next(cx) {
                     Poll::Ready(Some(Ok(bytes))) => {
-                        *self.as_mut().chunk() = Some(bytes);
+                        *this.chunk = Some(bytes);
                         // Go around the loop again in case the chunk is empty
                         continue;
                     }
                     Poll::Ready(Some(Err(err))) => return Poll::Ready(Some(Err(err))),
-                    Poll::Ready(None) => (&[] as &[_], true),
+                    Poll::Ready(None) => {
+                        *this.done = true;
+                        let (_, output) = this.decoder.decode(&[], true);
+                        if output.is_empty() {
+                            return Poll::Ready(None);
+                        }
+                        return Poll::Ready(Some(Ok(output)));
+                    }
                     Poll::Pending => return Poll::Pending,
                 },
             };
 
-            let (bytes_read, output) = self.as_mut().decoder().decode(src, last);
-            self.as_mut()
-                .chunk()
-                .as_mut()
-                .expect("no chunk")
-                .advance(bytes_read);
+            let (bytes_read, output) = this.decoder.decode(src, false);
+            this.chunk.as_mut().expect("no chunk").advance(bytes_read);
 
-            return Poll::Ready(Some(Ok(output)));
+            if !output.is_empty() {
+                return Poll::Ready(Some(Ok(output)));
+            }
         }
-    }
-}
-
-impl<S: Stream<Item = Result<Bytes>>> AsyncCharDecoder<S> {
-    fn inner(self: Pin<&mut Self>) -> Pin<&mut S> {
-        // SAFETY: `self.inner` is always pin projected
-        unsafe { self.map_unchecked_mut(|s| &mut s.inner) }
-    }
-
-    fn chunk(self: Pin<&mut Self>) -> &mut Option<Bytes> {
-        // SAFETY: `self.chunk` is never pin projected
-        unsafe { &mut self.get_unchecked_mut().chunk }
-    }
-
-    fn decoder(self: Pin<&mut Self>) -> &mut BufDecoder {
-        // SAFETY: `self.decoder` is never pin projected
-        unsafe { &mut self.get_unchecked_mut().decoder }
     }
 }
 
