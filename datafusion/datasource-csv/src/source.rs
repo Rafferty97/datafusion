@@ -215,7 +215,7 @@ impl CsvSource {
 /// A [`FileOpener`] that opens a CSV file and yields a [`FileOpenFuture`]
 pub struct CsvOpener {
     config: Arc<CsvSource>,
-    encoding: Option<CharEncoding>,
+    encoding: CharEncoding,
     file_compression_type: FileCompressionType,
     object_store: Arc<dyn ObjectStore>,
     partition_index: usize,
@@ -225,7 +225,7 @@ impl CsvOpener {
     /// Returns a [`CsvOpener`]
     pub fn new(
         config: Arc<CsvSource>,
-        encoding: Option<CharEncoding>,
+        encoding: CharEncoding,
         file_compression_type: FileCompressionType,
         object_store: Arc<dyn ObjectStore>,
     ) -> Self {
@@ -257,7 +257,8 @@ impl FileSource for CsvSource {
             .encoding
             .as_deref()
             .map(CharEncoding::for_label)
-            .transpose()?;
+            .transpose()?
+            .unwrap_or_default();
         let mut opener = Arc::new(CsvOpener {
             config: Arc::new(self.clone()),
             encoding,
@@ -411,7 +412,7 @@ impl FileOpener for CsvOpener {
                 #[cfg(not(target_arch = "wasm32"))]
                 GetResultPayload::File(mut file, _) => {
                     let is_whole_file_scanned = partitioned_file.range.is_none();
-                    let mut decoder = if is_whole_file_scanned {
+                    let decoder = if is_whole_file_scanned {
                         // Don't seek if no range as breaks FIFO files
                         file_compression_type.convert_read(file)?
                     } else {
@@ -421,11 +422,7 @@ impl FileOpener for CsvOpener {
                         )?
                     };
 
-                    #[cfg(feature = "encoding_rs")]
-                    if let Some(encoding) = encoding {
-                        use std::io::BufReader;
-                        decoder = encoding.convert_read(BufReader::new(decoder));
-                    }
+                    let decoder = encoding.convert_read(decoder);
 
                     let mut reader = config.open(decoder)?;
 
@@ -444,14 +441,9 @@ impl FileOpener for CsvOpener {
                 GetResultPayload::Stream(s) => {
                     let decoder = config.builder().build_decoder();
                     let s = s.map_err(DataFusionError::from);
-                    let mut input = file_compression_type.convert_stream(s.boxed())?;
+                    let input = file_compression_type.convert_stream(s.boxed())?;
 
-                    #[cfg(feature = "encoding_rs")]
-                    if let Some(encoding) = encoding {
-                        input = encoding.convert_stream(input);
-                    }
-
-                    let input = input.fuse();
+                    let input = encoding.convert_stream(input).fuse();
 
                     let stream = deserialize_stream(
                         input,
