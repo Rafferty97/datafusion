@@ -208,6 +208,30 @@ impl JsonFormat {
     pub fn is_newline_delimited(&self) -> bool {
         self.options.newline_delimited
     }
+
+    /// Whether to treat items as the value of the sole field in the schema.
+    ///
+    /// When `false`, each item in the file is expected to be an object whose
+    /// keys map to the fields in the schema. So, given an NDJSON file like this:
+    ///
+    /// ```text
+    /// {"key1": 1, "key2": "val"}
+    /// {"key1": 2, "key2": "vals"}
+    /// ```
+    ///
+    /// The values of "key1" would map to a field called "key1", and similarly for "key2".
+    ///
+    /// When `true`, each item is treated as the value for the one and only field
+    /// in the schema. So given the same NDJSON file as above, and a schema containing just
+    /// a single field called "foo", the entire object on each line would become the value of
+    /// the "foo" field.
+    ///
+    /// This is useful as it allows for JSON files to contain top-level arrays,
+    /// which wouldn't otherwise be permitted.
+    pub fn with_single_field(mut self, single_field: bool) -> Self {
+        self.options.single_field = single_field;
+        self
+    }
 }
 
 /// Infer schema from JSON array format using streaming conversion.
@@ -274,6 +298,7 @@ impl FileFormat for JsonFormat {
             .unwrap_or(DEFAULT_SCHEMA_INFER_MAX_RECORD);
         let file_compression_type = FileCompressionType::from(self.options.compression);
         let newline_delimited = self.options.newline_delimited;
+        let single_field = self.options.single_field;
 
         for object in objects {
             // Early exit if we've read enough records

@@ -1012,6 +1012,7 @@ impl TryFrom<&JsonOptions> for protobuf::JsonOptions {
             schema_infer_max_rec: opts.schema_infer_max_rec.map(|h| h as u64),
             compression_level: opts.compression_level,
             newline_delimited: Some(opts.newline_delimited),
+            single_field: Some(opts.single_field),
         })
     }
 }

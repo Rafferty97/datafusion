@@ -484,6 +484,7 @@ message JsonOptions {
   optional uint64 schema_infer_max_rec = 2; // Optional max records for schema inference
   optional uint32 compression_level = 3; // Optional compression level
   optional bool newline_delimited = 4; // Whether to read as newline-delimited JSON (default true). When false, expects JSON array format [{},...]
+  optional bool single_field = 5; // Whether to treat each item as the value of the sole field in the schema (default false).
 }
 
 message TableParquetOptions {

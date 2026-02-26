@@ -126,6 +126,7 @@ async fn json_opener() -> Result<()> {
         FileCompressionType::UNCOMPRESSED,
         Arc::new(object_store),
         true,
+        false,
     );
 
     let scan_config = FileScanConfigBuilder::new(

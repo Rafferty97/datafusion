@@ -90,7 +90,7 @@ impl ScalarUDFImpl for SparkArray {
         )));
 
         Ok(Arc::new(Field::new(
-            "this_field_name_is_irrelevant",
+            "thsingle_field_name_is_irrelevant",
             return_type,
             false,
         )))
