@@ -150,9 +150,6 @@ impl Debug for JsonFormatFactory {
 ///     {"key1": 2, "key2": "vals"}
 /// ]
 /// ```
-///
-/// Note: JSON array format is processed using streaming conversion,
-/// which is memory-efficient even for large files.
 #[derive(Debug, Default)]
 pub struct JsonFormat {
     options: JsonOptions,

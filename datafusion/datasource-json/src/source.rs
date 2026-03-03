@@ -19,16 +19,14 @@
 
 use std::any::Any;
 use std::io::{BufReader, Read, Seek, SeekFrom};
-use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context, Poll};
+use std::task::Poll;
 
 use crate::file_format::JsonDecoder;
-use crate::utils::{ChannelReader, JsonArrayToNdjsonReader};
 
 use datafusion_common::error::{DataFusionError, Result};
 use datafusion_common::tree_node::TreeNodeRecursion;
-use datafusion_common_runtime::{JoinSet, SpawnedTask};
+use datafusion_common_runtime::JoinSet;
 use datafusion_datasource::decoder::{DecoderDeserializer, deserialize_stream};
 use datafusion_datasource::file_compression_type::FileCompressionType;
 use datafusion_datasource::file_stream::{FileOpenFuture, FileOpener};
@@ -39,7 +37,6 @@ use datafusion_datasource::{
 use datafusion_physical_plan::projection::ProjectionExprs;
 use datafusion_physical_plan::{ExecutionPlan, ExecutionPlanProperties};
 
-use arrow::array::RecordBatch;
 use arrow::json::ReaderBuilder;
 use arrow::{datatypes::SchemaRef, json};
 use datafusion_datasource::file::FileSource;
@@ -47,55 +44,10 @@ use datafusion_datasource::file_scan_config::FileScanConfig;
 use datafusion_execution::TaskContext;
 use datafusion_physical_plan::metrics::ExecutionPlanMetricsSet;
 
-use futures::{Stream, StreamExt, TryStreamExt};
+use futures::{StreamExt, TryStreamExt};
 use object_store::buffered::BufWriter;
 use object_store::{GetOptions, GetResultPayload, ObjectStore};
 use tokio::io::AsyncWriteExt;
-use tokio_stream::wrappers::ReceiverStream;
-
-/// Channel buffer size for streaming JSON array processing.
-/// With ~128KB average chunk size, 128 chunks ≈ 16MB buffer.
-const CHANNEL_BUFFER_SIZE: usize = 128;
-
-/// Buffer size for JsonArrayToNdjsonReader (2MB each, 4MB total for input+output)
-const JSON_CONVERTER_BUFFER_SIZE: usize = 2 * 1024 * 1024;
-
-// ============================================================================
-// JsonArrayStream - Custom stream wrapper to hold SpawnedTask handles
-// ============================================================================
-
-/// A stream wrapper that holds SpawnedTask handles to keep them alive
-/// until the stream is fully consumed or dropped.
-///
-/// This ensures cancel-safety: when the stream is dropped, the tasks
-/// are properly aborted via SpawnedTask's Drop implementation.
-struct JsonArrayStream {
-    inner: ReceiverStream<std::result::Result<RecordBatch, arrow::error::ArrowError>>,
-    /// Task that reads from object store and sends bytes to channel.
-    /// Kept alive until stream is consumed or dropped.
-    _read_task: SpawnedTask<()>,
-    /// Task that parses JSON and sends RecordBatches.
-    /// Kept alive until stream is consumed or dropped.
-    _parse_task: SpawnedTask<()>,
-}
-
-impl Stream for JsonArrayStream {
-    type Item = std::result::Result<RecordBatch, arrow::error::ArrowError>;
-
-    fn poll_next(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
-        Pin::new(&mut self.inner).poll_next(cx)
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.inner.size_hint()
-    }
-}
-// ============================================================================
-// JsonOpener and JsonSource
-// ============================================================================
 
 /// A [`FileOpener`] that opens a JSON file and yields a [`FileOpenFuture`]
 pub struct JsonOpener {
@@ -316,146 +268,28 @@ impl FileOpener for JsonOpener {
                         }
                     };
 
-                    if newline_delimited {
-                        // NDJSON: use BufReader directly
-                        let reader = BufReader::new(bytes);
-                        let arrow_reader = ReaderBuilder::new(schema)
-                            .with_batch_size(batch_size)
-                            .build(reader)?;
+                    let reader = BufReader::new(bytes);
+                    let arrow_reader = ReaderBuilder::new(schema)
+                        .with_batch_size(batch_size)
+                        .with_flatten(!newline_delimited)
+                        .build(reader)?;
 
-                        Ok(futures::stream::iter(arrow_reader)
-                            .map(|r| r.map_err(Into::into))
-                            .boxed())
-                    } else {
-                        // JSON array format: wrap with streaming converter
-                        let ndjson_reader = JsonArrayToNdjsonReader::with_capacity(
-                            bytes,
-                            JSON_CONVERTER_BUFFER_SIZE,
-                        );
-                        let arrow_reader = ReaderBuilder::new(schema)
-                            .with_batch_size(batch_size)
-                            .build(ndjson_reader)?;
-
-                        Ok(futures::stream::iter(arrow_reader)
-                            .map(|r| r.map_err(Into::into))
-                            .boxed())
-                    }
+                    Ok(futures::stream::iter(arrow_reader)
+                        .map(|r| r.map_err(Into::into))
+                        .boxed())
                 }
                 GetResultPayload::Stream(s) => {
-                    if newline_delimited {
-                        // Newline-delimited JSON (NDJSON) streaming reader
-                        let s = s.map_err(DataFusionError::from);
-                        let decoder = ReaderBuilder::new(schema)
-                            .with_batch_size(batch_size)
-                            .build_decoder()?;
-                        let input =
-                            file_compression_type.convert_stream(s.boxed())?.fuse();
-                        let stream = deserialize_stream(
-                            input,
-                            DecoderDeserializer::new(JsonDecoder::new(decoder)),
-                        );
-                        Ok(stream.map_err(Into::into).boxed())
-                    } else {
-                        // JSON array format: streaming conversion with channel-based byte transfer
-                        //
-                        // Architecture:
-                        // 1. Async task reads from object store stream, decompresses, sends to channel
-                        // 2. Blocking task receives bytes, converts JSON array to NDJSON, parses to Arrow
-                        // 3. RecordBatches are sent back via another channel
-                        //
-                        // Memory budget (~32MB):
-                        // - sync_channel: CHANNEL_BUFFER_SIZE chunks (~16MB)
-                        // - JsonArrayToNdjsonReader: 2 × JSON_CONVERTER_BUFFER_SIZE (~4MB)
-                        // - Arrow JsonReader internal buffer (~8MB)
-                        // - Miscellaneous (~4MB)
-
-                        let s = s.map_err(DataFusionError::from);
-                        let decompressed_stream =
-                            file_compression_type.convert_stream(s.boxed())?;
-
-                        // Channel for bytes: async producer -> blocking consumer
-                        // Uses tokio::sync::mpsc so the async send never blocks a
-                        // tokio worker thread; the consumer calls blocking_recv()
-                        // inside spawn_blocking.
-                        let (byte_tx, byte_rx) = tokio::sync::mpsc::channel::<bytes::Bytes>(
-                            CHANNEL_BUFFER_SIZE,
-                        );
-
-                        // Channel for results: sync producer -> async consumer
-                        let (result_tx, result_rx) = tokio::sync::mpsc::channel(2);
-                        let error_tx = result_tx.clone();
-
-                        // Async task: read from object store stream and send bytes to channel
-                        // Store the SpawnedTask to keep it alive until stream is dropped
-                        let read_task = SpawnedTask::spawn(async move {
-                            tokio::pin!(decompressed_stream);
-                            while let Some(chunk) = decompressed_stream.next().await {
-                                match chunk {
-                                    Ok(bytes) => {
-                                        if byte_tx.send(bytes).await.is_err() {
-                                            break; // Consumer dropped
-                                        }
-                                    }
-                                    Err(e) => {
-                                        let _ = error_tx
-                                            .send(Err(
-                                                arrow::error::ArrowError::ExternalError(
-                                                    Box::new(e),
-                                                ),
-                                            ))
-                                            .await;
-                                        break;
-                                    }
-                                }
-                            }
-                            // byte_tx dropped here, signals EOF to ChannelReader
-                        });
-
-                        // Blocking task: receive bytes from channel and parse JSON
-                        // Store the SpawnedTask to keep it alive until stream is dropped
-                        let parse_task = SpawnedTask::spawn_blocking(move || {
-                            let channel_reader = ChannelReader::new(byte_rx);
-                            let mut ndjson_reader =
-                                JsonArrayToNdjsonReader::with_capacity(
-                                    channel_reader,
-                                    JSON_CONVERTER_BUFFER_SIZE,
-                                );
-
-                            match ReaderBuilder::new(schema)
-                                .with_batch_size(batch_size)
-                                .build(&mut ndjson_reader)
-                            {
-                                Ok(arrow_reader) => {
-                                    for batch_result in arrow_reader {
-                                        if result_tx.blocking_send(batch_result).is_err()
-                                        {
-                                            break; // Receiver dropped
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    let _ = result_tx.blocking_send(Err(e));
-                                }
-                            }
-
-                            // Validate the JSON array was properly formed
-                            if let Err(e) = ndjson_reader.validate_complete() {
-                                let _ = result_tx.blocking_send(Err(
-                                    arrow::error::ArrowError::JsonError(e.to_string()),
-                                ));
-                            }
-                            // result_tx dropped here, closes the stream
-                        });
-
-                        // Wrap in JsonArrayStream to keep tasks alive until stream is consumed
-                        let stream = JsonArrayStream {
-                            inner: ReceiverStream::new(result_rx),
-                            _read_task: read_task,
-                            _parse_task: parse_task,
-                        };
-
-                        Ok(stream.map(|r| r.map_err(Into::into)).boxed())
-                    }
+                    let s = s.map_err(DataFusionError::from);
+                    let decoder = ReaderBuilder::new(schema)
+                        .with_batch_size(batch_size)
+                        .with_flatten(!newline_delimited)
+                        .build_decoder()?;
+                    let input = file_compression_type.convert_stream(s.boxed())?.fuse();
+                    let stream = deserialize_stream(
+                        input,
+                        DecoderDeserializer::new(JsonDecoder::new(decoder)),
+                    );
+                    Ok(stream.map_err(Into::into).boxed())
                 }
             }
         }))
