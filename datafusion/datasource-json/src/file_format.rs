@@ -21,7 +21,7 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Debug;
-use std::io::{BufReader, Read};
+use std::io::BufReader;
 use std::sync::Arc;
 
 use crate::source::JsonSource;
@@ -30,7 +30,7 @@ use arrow::array::RecordBatch;
 use arrow::datatypes::{Schema, SchemaRef};
 use arrow::error::ArrowError;
 use arrow::json;
-use arrow::json::reader::{ValueIter, infer_json_schema_from_iterator};
+use arrow::json::reader::{InferJsonSchemaOptions, infer_json_schema_with_options};
 use bytes::{Buf, Bytes};
 use datafusion_common::config::{ConfigField, ConfigFileType, JsonOptions};
 use datafusion_common::file_options::json_writer::JsonWriterOptions;
@@ -59,7 +59,6 @@ use datafusion_physical_expr_common::sort_expr::LexRequirement;
 use datafusion_physical_plan::{DisplayAs, DisplayFormatType, ExecutionPlan};
 use datafusion_session::Session;
 
-use crate::utils::JsonArrayToNdjsonReader;
 use async_trait::async_trait;
 use object_store::{GetResultPayload, ObjectMeta, ObjectStore, ObjectStoreExt};
 
@@ -207,35 +206,6 @@ impl JsonFormat {
     }
 }
 
-/// Infer schema from JSON array format using streaming conversion.
-///
-/// This function converts JSON array format to NDJSON on-the-fly and uses
-/// arrow-json's schema inference. It properly tracks the number of records
-/// processed for correct `records_to_read` management.
-///
-/// # Returns
-/// A tuple of (Schema, records_consumed) where records_consumed is the
-/// number of records that were processed for schema inference.
-fn infer_schema_from_json_array<R: Read>(
-    reader: R,
-    max_records: usize,
-) -> Result<(Schema, usize)> {
-    let ndjson_reader = JsonArrayToNdjsonReader::new(reader);
-
-    let iter = ValueIter::new(ndjson_reader, None);
-    let mut count = 0;
-
-    let schema = infer_json_schema_from_iterator(iter.take_while(|_| {
-        let should_take = count < max_records;
-        if should_take {
-            count += 1;
-        }
-        should_take
-    }))?;
-
-    Ok((schema, count))
-}
-
 #[async_trait]
 impl FileFormat for JsonFormat {
     fn as_any(&self) -> &dyn Any {
@@ -270,7 +240,12 @@ impl FileFormat for JsonFormat {
             .schema_infer_max_rec
             .unwrap_or(DEFAULT_SCHEMA_INFER_MAX_RECORD);
         let file_compression_type = FileCompressionType::from(self.options.compression);
-        let newline_delimited = self.options.newline_delimited;
+
+        let options = InferJsonSchemaOptions {
+            max_read_records: Some(records_to_read),
+            flatten_top_level_arrays: !self.options.newline_delimited,
+            ..Default::default()
+        };
 
         for object in objects {
             // Early exit if we've read enough records
@@ -285,51 +260,17 @@ impl FileFormat for JsonFormat {
                 GetResultPayload::File(file, _) => {
                     let decoder = file_compression_type.convert_read(file)?;
                     let reader = BufReader::new(decoder);
-
-                    if newline_delimited {
-                        // NDJSON: use ValueIter directly
-                        let iter = ValueIter::new(reader, None);
-                        let mut count = 0;
-                        let schema =
-                            infer_json_schema_from_iterator(iter.take_while(|_| {
-                                let should_take = count < records_to_read;
-                                if should_take {
-                                    count += 1;
-                                }
-                                should_take
-                            }))?;
-                        (schema, count)
-                    } else {
-                        // JSON array format: use streaming converter
-                        infer_schema_from_json_array(reader, records_to_read)?
-                    }
+                    infer_json_schema_with_options(reader, options.clone())?
                 }
                 GetResultPayload::Stream(_) => {
                     let data = r.bytes().await?;
                     let decoder = file_compression_type.convert_read(data.reader())?;
                     let reader = BufReader::new(decoder);
-
-                    if newline_delimited {
-                        let iter = ValueIter::new(reader, None);
-                        let mut count = 0;
-                        let schema =
-                            infer_json_schema_from_iterator(iter.take_while(|_| {
-                                let should_take = count < records_to_read;
-                                if should_take {
-                                    count += 1;
-                                }
-                                should_take
-                            }))?;
-                        (schema, count)
-                    } else {
-                        // JSON array format: use streaming converter
-                        infer_schema_from_json_array(reader, records_to_read)?
-                    }
+                    infer_json_schema_with_options(reader, options.clone())?
                 }
             };
 
             schemas.push(schema);
-            // Correctly decrement records_to_read
             records_to_read = records_to_read.saturating_sub(records_consumed);
         }
 
@@ -368,7 +309,7 @@ impl FileFormat for JsonFormat {
         order_requirements: Option<LexRequirement>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
         if conf.insert_op != InsertOp::Append {
-            return not_impl_err!("Overwrites are not implemented yet for Json");
+            return not_impl_err!("Overwrites are not implemented yet for JSON");
         }
 
         let writer_options = JsonWriterOptions::try_from(&self.options)?;
