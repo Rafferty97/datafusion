@@ -688,6 +688,9 @@ pub struct JsonOptions {
     /// Whether to read as newline-delimited JSON (default true). When false, expects JSON array format \[{},...\]
     #[prost(bool, optional, tag = "4")]
     pub newline_delimited: ::core::option::Option<bool>,
+    /// Whether to treat each item as the value of the sole field in the schema (default false).
+    #[prost(bool, optional, tag = "5")]
+    pub single_field: ::core::option::Option<bool>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct TableParquetOptions {

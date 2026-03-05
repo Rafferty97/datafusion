@@ -4606,6 +4606,9 @@ impl serde::Serialize for JsonOptions {
         if self.newline_delimited.is_some() {
             len += 1;
         }
+        if self.single_field.is_some() {
+            len += 1;
+        }
         let mut struct_ser = serializer.serialize_struct("datafusion_common.JsonOptions", len)?;
         if self.compression != 0 {
             let v = CompressionTypeVariant::try_from(self.compression)
@@ -4622,6 +4625,9 @@ impl serde::Serialize for JsonOptions {
         }
         if let Some(v) = self.newline_delimited.as_ref() {
             struct_ser.serialize_field("newlineDelimited", v)?;
+        }
+        if let Some(v) = self.single_field.as_ref() {
+            struct_ser.serialize_field("singleField", v)?;
         }
         struct_ser.end()
     }
@@ -4640,6 +4646,8 @@ impl<'de> serde::Deserialize<'de> for JsonOptions {
             "compressionLevel",
             "newline_delimited",
             "newlineDelimited",
+            "single_field",
+            "singleField",
         ];
 
         #[allow(clippy::enum_variant_names)]
@@ -4648,6 +4656,7 @@ impl<'de> serde::Deserialize<'de> for JsonOptions {
             SchemaInferMaxRec,
             CompressionLevel,
             NewlineDelimited,
+            SingleField,
         }
         impl<'de> serde::Deserialize<'de> for GeneratedField {
             fn deserialize<D>(deserializer: D) -> std::result::Result<GeneratedField, D::Error>
@@ -4673,6 +4682,7 @@ impl<'de> serde::Deserialize<'de> for JsonOptions {
                             "schemaInferMaxRec" | "schema_infer_max_rec" => Ok(GeneratedField::SchemaInferMaxRec),
                             "compressionLevel" | "compression_level" => Ok(GeneratedField::CompressionLevel),
                             "newlineDelimited" | "newline_delimited" => Ok(GeneratedField::NewlineDelimited),
+                            "singleField" | "single_field" => Ok(GeneratedField::SingleField),
                             _ => Err(serde::de::Error::unknown_field(value, FIELDS)),
                         }
                     }
@@ -4696,6 +4706,7 @@ impl<'de> serde::Deserialize<'de> for JsonOptions {
                 let mut schema_infer_max_rec__ = None;
                 let mut compression_level__ = None;
                 let mut newline_delimited__ = None;
+                let mut single_field__ = None;
                 while let Some(k) = map_.next_key()? {
                     match k {
                         GeneratedField::Compression => {
@@ -4726,6 +4737,12 @@ impl<'de> serde::Deserialize<'de> for JsonOptions {
                             }
                             newline_delimited__ = map_.next_value()?;
                         }
+                        GeneratedField::SingleField => {
+                            if single_field__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("singleField"));
+                            }
+                            single_field__ = map_.next_value()?;
+                        }
                     }
                 }
                 Ok(JsonOptions {
@@ -4733,6 +4750,7 @@ impl<'de> serde::Deserialize<'de> for JsonOptions {
                     schema_infer_max_rec: schema_infer_max_rec__,
                     compression_level: compression_level__,
                     newline_delimited: newline_delimited__,
+                    single_field: single_field__,
                 })
             }
         }

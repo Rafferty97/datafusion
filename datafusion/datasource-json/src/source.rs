@@ -58,6 +58,9 @@ pub struct JsonOpener {
     /// When `true` (default), expects newline-delimited JSON (NDJSON).
     /// When `false`, expects JSON array format `[{...}, {...}]`.
     newline_delimited: bool,
+    /// When `true`, each item is treated as the value for the sole field in the schema.
+    /// When `false`, each item is treated as an object whose keys map to the fields in the schema.
+    single_field: bool,
 }
 
 impl JsonOpener {
@@ -68,6 +71,7 @@ impl JsonOpener {
         file_compression_type: FileCompressionType,
         object_store: Arc<dyn ObjectStore>,
         newline_delimited: bool,
+        single_field: bool,
     ) -> Self {
         Self {
             batch_size,
@@ -75,6 +79,7 @@ impl JsonOpener {
             file_compression_type,
             object_store,
             newline_delimited,
+            single_field,
         }
     }
 }
@@ -89,6 +94,9 @@ pub struct JsonSource {
     /// When `true` (default), expects newline-delimited JSON (NDJSON).
     /// When `false`, expects JSON array format `[{...}, {...}]`.
     newline_delimited: bool,
+    /// When `true`, each item is treated as the value for the sole field in the schema.
+    /// When `false`, each item is treated as an object whose keys map to the fields in the schema.
+    single_field: bool,
 }
 
 impl JsonSource {
@@ -101,6 +109,7 @@ impl JsonSource {
             batch_size: None,
             metrics: ExecutionPlanMetricsSet::new(),
             newline_delimited: true,
+            single_field: false,
         }
     }
 
@@ -110,6 +119,17 @@ impl JsonSource {
     /// When `false`, expects JSON array format `[{...}, {...}]`.
     pub fn with_newline_delimited(mut self, newline_delimited: bool) -> Self {
         self.newline_delimited = newline_delimited;
+        self
+    }
+
+    /// Set whether to treat each item in the file as the value of the sole field in the schema,
+    /// where an "item" is a single line in a newline-delimited JSON file,
+    /// or an element of the top-level array in a JSON array format file.
+    ///
+    /// When `true`, each item is treated as the value for the sole field in the schema.
+    /// When `false` (default), each item is treated as an object whose keys map to the fields in the schema.
+    pub fn with_single_field(mut self, single_field: bool) -> Self {
+        self.single_field = single_field;
         self
     }
 }
@@ -140,6 +160,7 @@ impl FileSource for JsonSource {
             file_compression_type: base_config.file_compression_type,
             object_store,
             newline_delimited: self.newline_delimited,
+            single_field: self.single_field,
         }) as Arc<dyn FileOpener>;
 
         // Wrap with ProjectionOpener
@@ -223,6 +244,7 @@ impl FileOpener for JsonOpener {
         let batch_size = self.batch_size;
         let file_compression_type = self.file_compression_type.to_owned();
         let newline_delimited = self.newline_delimited;
+        let single_field = self.single_field;
 
         // JSON array format requires reading the complete file
         if !newline_delimited && partitioned_file.range.is_some() {
@@ -256,6 +278,16 @@ impl FileOpener for JsonOpener {
                 .get_opts(&partitioned_file.object_meta.location, options)
                 .await?;
 
+            let reader_builder = if single_field {
+                ReaderBuilder::new(schema)
+            } else {
+                debug_assert!(schema.fields().len() == 1);
+                ReaderBuilder::new_with_field(schema.fields()[0].clone())
+            };
+            let reader_builder = reader_builder
+                .with_batch_size(batch_size)
+                .with_flatten(!newline_delimited);
+
             match result.payload {
                 #[cfg(not(target_arch = "wasm32"))]
                 GetResultPayload::File(mut file, _) => {
@@ -269,10 +301,7 @@ impl FileOpener for JsonOpener {
                     };
 
                     let reader = BufReader::new(bytes);
-                    let arrow_reader = ReaderBuilder::new(schema)
-                        .with_batch_size(batch_size)
-                        .with_flatten(!newline_delimited)
-                        .build(reader)?;
+                    let arrow_reader = reader_builder.build(reader)?;
 
                     Ok(futures::stream::iter(arrow_reader)
                         .map(|r| r.map_err(Into::into))
@@ -280,10 +309,7 @@ impl FileOpener for JsonOpener {
                 }
                 GetResultPayload::Stream(s) => {
                     let s = s.map_err(DataFusionError::from);
-                    let decoder = ReaderBuilder::new(schema)
-                        .with_batch_size(batch_size)
-                        .with_flatten(!newline_delimited)
-                        .build_decoder()?;
+                    let decoder = reader_builder.build_decoder()?;
                     let input = file_compression_type.convert_stream(s.boxed())?.fuse();
                     let stream = deserialize_stream(
                         input,
@@ -387,6 +413,7 @@ mod tests {
             FileCompressionType::UNCOMPRESSED,
             store.clone(),
             false, // JSON array format
+            false,
         );
 
         let meta = store.head(&path).await?;
@@ -419,6 +446,7 @@ mod tests {
             FileCompressionType::UNCOMPRESSED,
             store.clone(),
             false, // JSON array format
+            false,
         );
 
         let meta = store.head(&path).await?;
@@ -458,6 +486,7 @@ mod tests {
             FileCompressionType::UNCOMPRESSED,
             store.clone(),
             false,
+            false,
         );
 
         let meta = store.head(&path).await?;
@@ -487,6 +516,7 @@ mod tests {
             test_schema(),
             FileCompressionType::UNCOMPRESSED,
             store.clone(),
+            false,
             false,
         );
 
@@ -518,6 +548,7 @@ mod tests {
             FileCompressionType::UNCOMPRESSED,
             store.clone(),
             false, // JSON array format
+            false,
         );
 
         let meta = store.head(&path).await.unwrap();
@@ -554,6 +585,7 @@ mod tests {
             FileCompressionType::UNCOMPRESSED,
             store.clone(),
             true, // NDJSON format
+            false,
         );
 
         let meta = store.head(&path).await?;
@@ -591,6 +623,7 @@ mod tests {
             test_schema(),
             FileCompressionType::UNCOMPRESSED,
             store.clone(),
+            false,
             false,
         );
 
@@ -632,6 +665,7 @@ mod tests {
             test_schema(),
             FileCompressionType::UNCOMPRESSED,
             store.clone(),
+            false,
             false,
         );
 
