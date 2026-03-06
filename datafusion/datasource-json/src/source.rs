@@ -59,7 +59,7 @@ pub struct JsonOpener {
     /// When `false`, expects JSON array format `[{...}, {...}]`.
     newline_delimited: bool,
     /// When `true`, each item is treated as the value for the sole field in the schema.
-    /// When `false`, each item is treated as an object whose keys map to the fields in the schema.
+    /// When `false` (default), each item is treated as an object whose keys map to the fields in the schema.
     single_field: bool,
 }
 
@@ -279,10 +279,10 @@ impl FileOpener for JsonOpener {
                 .await?;
 
             let reader_builder = if single_field {
-                ReaderBuilder::new(schema)
-            } else {
                 debug_assert!(schema.fields().len() == 1);
                 ReaderBuilder::new_with_field(schema.fields()[0].clone())
+            } else {
+                ReaderBuilder::new(schema)
             };
             let reader_builder = reader_builder
                 .with_batch_size(batch_size)
