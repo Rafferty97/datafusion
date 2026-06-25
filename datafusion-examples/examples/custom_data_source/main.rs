@@ -27,16 +27,16 @@
 //! Each subcommand runs a corresponding example:
 //! - `all` — run all examples included in this module
 //!
-//! - `adapter_serialization`  
+//! - `adapter_serialization`
 //!   (file: adapter_serialization.rs, desc: Preserve custom PhysicalExprAdapter information during plan serialization using PhysicalExtensionCodec interception)
 //!
-//! - `csv_json_opener`  
+//! - `csv_json_opener`
 //!   (file: csv_json_opener.rs, desc: Use low-level FileOpener APIs for CSV/JSON)
 //!
 //! - `csv_sql_streaming`
 //!   (file: csv_sql_streaming.rs, desc: Run a streaming SQL query against CSV data)
 //!
-//! - `custom_datasource`  
+//! - `custom_datasource`
 //!   (file: custom_datasource.rs, desc: Query a custom TableProvider)
 //!
 //! - `custom_file_casts`
@@ -59,6 +59,7 @@ mod custom_file_casts;
 mod custom_file_format;
 mod default_column_values;
 mod file_stream_provider;
+mod non_utf8_csv;
 
 use datafusion::error::{DataFusionError, Result};
 use strum::{IntoEnumIterator, VariantNames};
@@ -76,6 +77,7 @@ enum ExampleKind {
     CustomFileFormat,
     DefaultColumnValues,
     FileStreamProvider,
+    NonUtf8Csv,
 }
 
 impl ExampleKind {
@@ -115,6 +117,7 @@ impl ExampleKind {
             ExampleKind::FileStreamProvider => {
                 file_stream_provider::file_stream_provider().await?
             }
+            ExampleKind::NonUtf8Csv => non_utf8_csv::non_utf8_csv().await?,
         }
         Ok(())
     }
